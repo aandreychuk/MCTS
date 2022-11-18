@@ -79,9 +79,7 @@ public:
                 if ((executed_pos[i].first == executed_pos[j].first &&
                      executed_pos[i].second == executed_pos[j].second) ||
                     (executed_pos[i].first == cur_positions[j].first &&
-                     executed_pos[i].second == cur_positions[j].second
-                     && executed_pos[j].first == cur_positions[i].first &&
-                     executed_pos[j].second == cur_positions[i].second))
+                     executed_pos[i].second == cur_positions[j].second))
                 {
                     executed_pos[i] = cur_positions[i];
                     executed_pos[j] = cur_positions[j];
