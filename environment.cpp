@@ -1,15 +1,17 @@
-#ifndef MCTS_ENVIRONMENT_H
-#define MCTS_ENVIRONMENT_H
+// cppimport
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
 #include <vector>
 #include <iostream>
 #include <random>
 #include <chrono>
-#include "tinyxml2.h"
+#include <string>
 #define OBSTACLE 1
 #define TRAVERSABLE 0
-using namespace tinyxml2;
+namespace py = pybind11;
 
-class Environment
+class environment
 {
     int num_agents;
     std::vector<std::pair<int, int>> moves = {{0,0}, {-1, 0}, {1,0},{0,-1},{0,1}};
@@ -20,32 +22,36 @@ class Environment
     std::vector<bool> reached;
     std::default_random_engine engine;
 public:
-    explicit Environment(const std::string& fileName, int seed)
+    explicit environment()
     {
-        load_instance(fileName.c_str());
-        num_agents = goals.size();
-        reached.resize(num_agents, false);
-        set_seed(seed);
+        num_agents = 0;
     }
-
-    void set_seed(const int seed)
+    void set_seed(int seed=-1)
     {
         if(seed < 0)
             engine.seed(std::chrono::system_clock::now().time_since_epoch().count());
         else
             engine.seed(seed);
     }
-
-    void reset_seed()
+    void add_agent(int si, int sj, int gi, int gj)
     {
-        engine.seed(std::chrono::system_clock::now().time_since_epoch().count());
+        cur_positions.push_back({si, sj});
+        goals.push_back({gi, gj});
+        num_agents++;
+        reached.push_back(false);
     }
-
+    void create_grid(int height, int width)
+    {
+        grid = std::vector<std::vector<int>>(height, std::vector<int>(width,TRAVERSABLE));
+    }
+    void add_obstacle(int i, int j)
+    {
+        grid[i][j] = OBSTACLE;
+    }
     int get_num_agents()
     {
         return num_agents;
     }
-
     bool reached_goal(int i)
     {
         if(i >= 0 && i < num_agents)
@@ -53,41 +59,6 @@ public:
         else
             return false;
     }
-
-    void load_instance(const char* fileName)
-    {
-        XMLDocument doc;
-        if(doc.LoadFile(fileName) != XMLError::XML_SUCCESS)
-        {
-            std::cout << "Error openning input XML file."<<std::endl;
-            return;
-        }
-        XMLElement* root;
-        root = doc.FirstChildElement("root");
-        for(auto elem = root->FirstChildElement("agent"); elem; elem = elem->NextSiblingElement("agent"))
-        {
-            cur_positions.emplace_back(elem->IntAttribute("start_i"), elem->IntAttribute("start_j"));
-            goals.emplace_back(elem->IntAttribute("goal_i"), elem->IntAttribute("goal_j"));
-        }
-        XMLElement* map = root->FirstChildElement("map");
-        grid = std::vector<std::vector<int>>(map->IntAttribute("width"), std::vector<int>(map->IntAttribute("height"),TRAVERSABLE));
-        int curi(0), curj(0);
-        for(auto row = map->FirstChildElement("row"); row; row = row->NextSiblingElement("row"))
-        {
-            std::string values = row->GetText();
-            curj = 0;
-            for(char value : values)
-            {
-                if(value == ' ')
-                    continue;
-                if(value == '1')
-                    grid[curi][curj] = OBSTACLE;
-                curj++;
-            }
-            curi++;
-        }
-    }
-
     double step(std::vector<int> actions)
     {
         std::vector<std::pair<int, int>> executed_pos;
@@ -140,7 +111,6 @@ public:
         cur_positions = executed_pos;
         return reward;
     }
-
     void step_back()
     {
         for(int i = 0; i < num_agents; i++)
@@ -152,28 +122,27 @@ public:
         }
         made_actions.pop_back();
     }
-
-    std::vector<int> sample_actions(int num_actions, const bool use_move_limits=false, const bool agents_as_obstackles=false)
+    std::vector<int> sample_actions(int num_actions)
     {
+        bool use_move_limits = true;//TODO - retrun to parameters
+        bool agents_as_obstacles = false;//TODO - return to parameters
         std::vector<int> actions;
         for(int i = 0; i < num_agents; i++)
         {
             auto action = engine() % num_actions;
             if (use_move_limits)
             {
-                while (!check_action(i, action, agents_as_obstackles))
+                while (!check_action(i, action, agents_as_obstacles))
                     action = engine() % num_actions;
             }
             actions.emplace_back(action);
         }
         return actions;
     }
-
     bool all_done()
     {
         return num_agents == std::accumulate(reached.begin(), reached.end(), 0);
     }
-
     void render()
     {
         for(int i = 0; i < num_agents; i++) {
@@ -200,9 +169,8 @@ public:
             }
             std::cout<<std::endl;
         }
-    }
-
-    const bool check_action(const int agent_idx, const int action, const bool agents_as_obstacles) const
+    };
+    bool check_action(const int agent_idx, const int action, const bool agents_as_obstacles) const
     {
         const std::pair<int, int> future_position = {cur_positions[agent_idx].first + moves[action].first, cur_positions[agent_idx].second + moves[action].second};
         if (future_position.first < 0 || future_position.second < 0 || future_position.first >= grid.size() || future_position.second >= grid.size())
@@ -224,4 +192,25 @@ public:
     }
 };
 
-#endif //MCTS_ENVIRONMENT_H
+PYBIND11_MODULE(environment, m) {
+    py::class_<environment>(m, "environment")
+            .def(py::init<>())
+            .def("all_done", &environment::all_done)
+            .def("sample_actions", &environment::sample_actions)
+            .def("step", &environment::step)
+            .def("step_back", &environment::step_back)
+            .def("set_seed", &environment::set_seed)
+            .def("create_grid", &environment::create_grid)
+            .def("add_obstacle", &environment::add_obstacle)
+            .def("add_agent", &environment::add_agent)
+            .def("render", &environment::render)
+            .def("get_num_agents", &environment::get_num_agents)
+            .def("reached_goal", &environment::reached_goal)
+            ;
+}
+
+/*
+<%
+setup_pybind11(cfg)
+%>
+*/
