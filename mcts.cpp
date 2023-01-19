@@ -5,6 +5,11 @@
 #include "BS_thread_pool.hpp"
 #include "mcts.hpp"
 #include <mutex>
+#include <deque>
+#include <utility>
+#include <functional>
+#include <chrono>
+
 std::mutex insert_mutex;
 namespace py = pybind11;
 
@@ -28,13 +33,31 @@ Node* MonteCarloTreeSearch::safe_insert_node(Node* n, const int action, const do
 
 double MonteCarloTreeSearch::single_simulation(const int process_num)
 {
+    // std::chrono::steady_clock::time_point begin = // std::chrono::steady_clock::now();
     penvs[process_num].reset_seed();
     double score(0);
     double g(1), reward(0);
     int num_steps(0);
+    RePlan replan;
+    if (cfg.simulation_type == "replan")
+    {
+        replan = RePlan();
+        replan.init(penvs[process_num].get_num_agents(), obs_radius, true, 0.2, true, 10000000, -1, false);
+        replan.set_env(penvs[process_num]);
+    }
     while(!penvs[process_num].all_done() && num_steps < cfg.steps_limit)
     {
-        reward = penvs[process_num].step(penvs[process_num].sample_actions(cfg.num_actions, cfg.use_move_limits, cfg.agents_as_obstacles));
+        std::vector<int> actions_tbd;
+        actions_tbd.reserve(penvs[process_num].get_num_agents());
+        if (cfg.simulation_type == "replan")
+        {
+            actions_tbd = replan.act();
+        }
+        else
+        {
+            actions_tbd = penvs[process_num].sample_actions(cfg.num_actions, cfg.use_move_limits, cfg.agents_as_obstacles);
+        }
+        reward = penvs[process_num].step(actions_tbd);
         num_steps++;
         score += reward*g;
         g *= cfg.gamma;
@@ -43,6 +66,8 @@ double MonteCarloTreeSearch::single_simulation(const int process_num)
     {
         penvs[process_num].step_back();
     }
+    // std::chrono::steady_clock::time_point end = // std::chrono::steady_clock::now();
+    // std::cout << "simulation = " << // std::chrono::duration_cast<// std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
     return score;
 }
 
@@ -69,9 +94,17 @@ double MonteCarloTreeSearch::simulation(const int process_num = 0)
     return result;
 }
 
-double MonteCarloTreeSearch::uct(Node* n) const
+double MonteCarloTreeSearch::uct(Node* n, const int agent_idx, const int process_num) const
 {
-    return n->q + cfg.uct_c*std::sqrt(2.0*std::log(n->parent->cnt)/n->cnt);
+    auto uct_val = n->q + cfg.uct_c*std::sqrt(2.0*std::log(n->parent->cnt)/n->cnt);
+    if (cfg.heuristic_coef > 0)
+    {
+        const auto position = penvs[process_num].cur_positions[agent_idx];
+        const auto move = penvs[process_num].moves[n->action_id];
+        const int lenpath = shortest_paths[agent_idx][position.first][position.second] - shortest_paths[agent_idx][position.first + move.first][position.second + move.second];
+        uct_val += cfg.heuristic_coef * lenpath / n->cnt;
+    }
+    return uct_val;
 }
 
 double MonteCarloTreeSearch::batch_uct(Node* n) const
@@ -83,7 +116,7 @@ double MonteCarloTreeSearch::batch_uct(Node* n) const
 int MonteCarloTreeSearch::expansion(Node* n, const int agent_idx, const int process_num = 0) const
 {
     int best_action(0), k(0);
-    double best_score(-1);
+    double best_score(-1000000);
     for(auto c: n->child_nodes)
     {
         if ((cfg.use_move_limits && penvs[process_num].check_action(agent_idx, k, cfg.agents_as_obstacles)) || !cfg.use_move_limits)
@@ -92,9 +125,11 @@ int MonteCarloTreeSearch::expansion(Node* n, const int agent_idx, const int proc
             {
                 return k;
             }
-            if (uct(c) > best_score) {
+            const auto uct_val = uct(c, agent_idx, process_num);
+            if (uct_val > best_score)
+            {
                 best_action = k;
-                best_score = uct(c);
+                best_score = uct_val;
             }
         }
         k++;
@@ -109,7 +144,9 @@ double MonteCarloTreeSearch::selection(Node* n, std::vector<int> actions, const 
     int action(0);
     double score;
     if(!penvs[process_num].reached_goal(agent_idx))
+    {
         action = expansion(n, agent_idx, process_num);
+    }
     if(actions.size() == penvs[process_num].get_num_agents())
     {
         double reward = penvs[process_num].step(actions);
@@ -367,7 +404,7 @@ std::vector<int> MonteCarloTreeSearch::act()
             }
             std::cout<<std::endl;
             for(int i = 0; i < cfg.num_actions; i++) {
-                double c = (root->child_nodes[i] == nullptr) ? 0.0 : uct(root->child_nodes[i]);
+                double c = (root->child_nodes[i] == nullptr) ? 0.0 : uct(root->child_nodes[i], agent_idx, 0);
                 std::cout << action_names[i] << ":" << c << " ";
             }
             std::cout<<std::endl;
@@ -407,7 +444,7 @@ void MonteCarloTreeSearch::set_config(const Config& config)
     cfg = config;
 }
 
-void MonteCarloTreeSearch::set_env(Environment env)
+void MonteCarloTreeSearch::set_env(Environment env, const int obs_radius_)
 {
     for(int i = 0; i < cfg.num_parallel_trees; i++)
     {
@@ -419,6 +456,56 @@ void MonteCarloTreeSearch::set_env(Environment env)
         penvs.push_back(env);
     }
     root = ptrees[0];
+    if (cfg.heuristic_coef > 0)
+    {
+        shortest_paths = bfs(env);
+    }
+    obs_radius = obs_radius_;
+}
+
+std::vector<std::vector<std::vector<double>>> MonteCarloTreeSearch::bfs(Environment& env)
+{
+    auto obstacles = env.grid;
+
+    std::vector<std::vector<std::vector<double>>> agents_map(env.num_agents, std::vector(obstacles.size(), std::vector<double>(obstacles.size())));
+    agents_map.reserve(env.num_agents);
+
+    for(size_t i = 0; i < env.num_agents; i++)
+    {
+        std::vector<std::vector<double>> filled(obstacles.size(), std::vector<double>(obstacles.size()));
+        for(size_t j = 0; j < filled.size(); j++)
+        {
+            for(size_t k = 0; k < filled[0].size(); k++)
+            {
+                if(obstacles[j][k] >= 0)
+                {
+                    filled[j].push_back(1000000);
+                }
+            }
+        }
+        filled[env.goals[i].first][env.goals[i].second] = 0;
+        std::deque<std::pair<int, int>> q;
+        q.push_back(env.goals[i]);
+        while (q.size() > 0)
+        {
+            auto pos = q.front();
+            q.pop_front();
+            for(const auto& move: env.moves)
+            {
+                if ((pos.first + move.first >= 0) && (static_cast<size_t>(pos.first + move.first) < filled.size())\
+                         && (pos.second + move.second >= 0) && (static_cast<size_t>(pos.second + move.second) < filled[0].size()))
+                {
+                    if ((filled[pos.first + move.first][pos.second + move.second] == 1000000) && env.grid[pos.first + move.first][pos.second + move.second] != 1)
+                    {
+                        q.push_back(std::make_pair(pos.first + move.first, pos.second + move.second));
+                        filled[pos.first + move.first][pos.second + move.second] = filled[pos.first][pos.second] + 1;
+                    }
+                }
+            }
+        }
+        agents_map.push_back(filled);
+    }
+    return agents_map;
 }
 
 PYBIND11_MODULE(mcts, m) {

@@ -2,6 +2,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <string>
 namespace py = pybind11;
 struct Config
 {
@@ -16,6 +17,8 @@ struct Config
     int batch_size = 1;
     int num_parallel_trees = 1;
     bool render = true;
+    double heuristic_coef = 0;
+    std::string simulation_type = "random";
 };
 
 PYBIND11_MODULE(config, m) {
@@ -32,6 +35,8 @@ PYBIND11_MODULE(config, m) {
         .def_readwrite("batch_size", &Config::batch_size)
         .def_readwrite("num_parallel_trees", &Config::num_parallel_trees)
         .def_readwrite("render", &Config::render)
+        .def_readwrite("heuristic_coef", &Config::heuristic_coef)
+        .def_readwrite("simulation_type", &Config::simulation_type)
         ;
 }
 

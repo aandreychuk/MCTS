@@ -10,9 +10,10 @@
 #include <cmath>
 #include <string>
 #include <chrono>
+#include <unordered_map>
 #include "config.cpp"
 #include "node.hpp"
-#include "environment.cpp"
+#include "replan.cpp"
 
 class MonteCarloTreeSearch
 {
@@ -24,6 +25,8 @@ class MonteCarloTreeSearch
     std::vector<Node*> ptrees;
     std::vector<Environment> penvs;
     int num_envs;
+    std::vector<std::vector<std::vector<double>>> shortest_paths;
+    int obs_radius;
 public:
     Environment env;
 
@@ -31,7 +34,7 @@ public:
 
     std::vector<int> act();
 
-    void set_env(Environment env_);
+    void set_env(Environment env_, const int obs_radius_);
 
     void set_config(const Config& config);
 
@@ -42,7 +45,7 @@ protected:
 
     double simulation(const int process_num);
 
-    double uct(Node* n) const;
+    double uct(Node* n, const int agent_idx, const int process_num) const;
 
     double batch_uct(Node* n) const;
 
@@ -65,4 +68,6 @@ protected:
     void tree_parallelization_loop_internal(std::vector<int> prev_actions, const int process_num);
 
     void tree_parallelization_loop(std::vector<int>& prev_actions);
+
+    std::vector<std::vector<std::vector<double>>> bfs(Environment& env);
 };
