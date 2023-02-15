@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<root>
+	<agent start_i="0" start_j="0" goal_i="0" goal_j="2"/>
+	<map width="3" height="3">
+		<row>0 0 0</row>
+		<row>0 0 0</row>
+		<row>0 0 0</row>
+	</map>
+</root>
