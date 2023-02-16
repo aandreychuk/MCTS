@@ -1,9 +1,18 @@
 <?xml version="1.0" ?>
 <root>
-	<agent start_i="0" start_j="0" goal_i="0" goal_j="2"/>
-	<map width="3" height="3">
-		<row>0 0 0</row>
-		<row>0 0 0</row>
-		<row>0 0 0</row>
+	<agent start_i="0" start_j="0" goal_i="9" goal_j="9"/>
+	<agent start_i="9" start_j="9" goal_i="0" goal_j="0"/>
+	<agent start_i="0" start_j="9" goal_i="9" goal_j="0"/>
+	<map width="10" height="10">
+		<row>0 0 0 0 0 0 0 0 0 0</row>
+		<row>0 0 0 0 0 0 0 0 0 0</row>
+		<row>0 0 0 0 0 0 0 0 0 0</row>
+		<row>0 0 0 0 0 0 0 0 0 0</row>
+		<row>0 0 0 0 0 0 0 0 0 0</row>
+		<row>0 0 0 0 0 0 0 0 0 0</row>
+		<row>0 0 0 0 0 0 0 0 0 0</row>
+		<row>0 0 0 0 0 0 0 0 0 0</row>
+		<row>0 0 0 0 0 0 0 0 0 0</row>
+		<row>0 0 0 0 0 0 0 0 0 0</row>
 	</map>
 </root>

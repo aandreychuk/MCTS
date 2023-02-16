@@ -107,8 +107,7 @@ public:
             n = child;
             path.push_back(child);
         }
-        for(auto p:path)
-            env.step(p->actions);
+
         auto actions = env.sample_actions(cfg.num_actions);
         int tries = 0;
         while(n->child_nodes.find(actions) != n->child_nodes.end() && tries < 100)
@@ -122,21 +121,30 @@ public:
             n->child_nodes[actions] = &all_nodes.back();
             child = n->child_nodes[actions];
             path.push_back(child);
-            double reward = env.step(actions);
-            backprop(reward, path.back());
+
+            std::list<double> rewards = {0, 0};
+            for(auto p:path)
+            {
+                double reward = env.step(p->actions);
+                rewards.push_back(reward);
+            }
+            rewards.back() = rewards.back() + simulation();
+            backprop(rewards, path.back());
+            for(auto p:path)
+                env.step_back();
         }
-        for(auto p:path)
-            env.step_back();
     }
 
-    void backprop(double reward, Node* node)
+    void backprop(std::list<double> rewards, Node* node)
     {
-        double score = reward + simulation();
+        double score = rewards.back();
         while(node != nullptr)
         {
             node->update_value(score);
             score *= cfg.gamma;
             node = node->parent;
+            rewards.pop_back();
+            score += rewards.back();
         }
     }
     void loop()
@@ -154,6 +162,7 @@ public:
         std::cout<<"\n";
         env.render();
         root = root->get_best_child();
+        root->parent = nullptr;//to stop backprop
         for(auto a:root->actions)
             std::cout<<a<<" ";
         std::cout<<" - actions\n";
